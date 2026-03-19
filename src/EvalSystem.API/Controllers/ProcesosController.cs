@@ -37,4 +37,9 @@ public class ProcesosController : BaseApiController
     [Authorize(Roles = "Admin,Evaluador")]
     public async Task<IActionResult> AsignarEvaluaciones(Guid procesoId, [FromBody] AsignarEvaluacionesDto dto)
         => Respond(await _service.AsignarEvaluacionesAsync(procesoId, dto));
+
+    [HttpGet("mis-evaluaciones")]
+    [Authorize(Roles = "Candidato")]
+    public async Task<IActionResult> MisEvaluaciones()
+        => Respond(await _service.GetMisEvaluacionesAsync(GetUserId()));
 }

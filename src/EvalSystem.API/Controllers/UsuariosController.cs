@@ -15,6 +15,10 @@ public class UsuariosController : BaseApiController
     [HttpGet]
     public async Task<IActionResult> GetAll() => Respond(await _service.GetAllAsync());
 
+    [HttpGet("candidatos")]
+    [Authorize(Roles = "Admin,Evaluador")]
+    public async Task<IActionResult> GetCandidatos() => Respond(await _service.GetCandidatosAsync());
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id) => Respond(await _service.GetByIdAsync(id));
 

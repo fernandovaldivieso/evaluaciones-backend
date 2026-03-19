@@ -15,17 +15,19 @@ public class SesionService : ISesionService
     private readonly IRepository<Evaluacion> _evalRepo;
     private readonly IRepository<Pregunta> _preguntaRepo;
     private readonly IRepository<OpcionRespuesta> _opcionRepo;
+    private readonly IRepository<ProcesoCandidato> _pcRepo;
     private readonly IUnitOfWork _uow;
 
     public SesionService(IRepository<SesionEvaluacion> sesionRepo, IRepository<RespuestaCandidato> respuestaRepo,
         IRepository<Evaluacion> evalRepo, IRepository<Pregunta> preguntaRepo,
-        IRepository<OpcionRespuesta> opcionRepo, IUnitOfWork uow)
+        IRepository<OpcionRespuesta> opcionRepo, IRepository<ProcesoCandidato> pcRepo, IUnitOfWork uow)
     {
         _sesionRepo = sesionRepo;
         _respuestaRepo = respuestaRepo;
         _evalRepo = evalRepo;
         _preguntaRepo = preguntaRepo;
         _opcionRepo = opcionRepo;
+        _pcRepo = pcRepo;
         _uow = uow;
     }
 
@@ -41,12 +43,37 @@ public class SesionService : ISesionService
         if (!evaluacion.Activa)
             return ApiResponse<SesionDto>.BadRequest("La evaluación no está activa.");
 
-        var sesionExistente = await _sesionRepo.Query()
-            .AnyAsync(s => s.CandidatoId == candidatoId && s.EvaluacionId == dto.EvaluacionId
+        // Resolve procesoId: use the one from request or auto-detect from enrollment
+        var resolvedProcesoId = dto.ProcesoId;
+        if (!resolvedProcesoId.HasValue)
+        {
+            resolvedProcesoId = await _pcRepo.Query()
+                .Where(pc => pc.CandidatoId == candidatoId
+                    && (pc.Proceso.Estado == EstadoProceso.Abierto || pc.Proceso.Estado == EstadoProceso.EnCurso)
+                    && pc.Proceso.Evaluaciones.Any(pe => pe.EvaluacionId == dto.EvaluacionId))
+                .Select(pc => (Guid?)pc.ProcesoId)
+                .FirstOrDefaultAsync();
+        }
+
+        if (!resolvedProcesoId.HasValue)
+            return ApiResponse<SesionDto>.Forbidden("No tienes acceso a esta evaluación.");
+
+        // Check for existing active session (Pendiente or EnProgreso) → return it
+        var sesionActiva = await _sesionRepo.Query()
+            .Include(s => s.Candidato).Include(s => s.Evaluacion)
+            .FirstOrDefaultAsync(s => s.CandidatoId == candidatoId && s.EvaluacionId == dto.EvaluacionId
                 && (s.Estado == EstadoSesion.Pendiente || s.Estado == EstadoSesion.EnProgreso));
 
-        if (sesionExistente)
-            return ApiResponse<SesionDto>.Conflict("Ya existe una sesión activa para esta evaluación.");
+        if (sesionActiva is not null)
+            return ApiResponse<SesionDto>.Ok(ToDto(sesionActiva), "Sesión activa existente.");
+
+        // Check for completed session → cannot retake
+        var sesionFinalizada = await _sesionRepo.Query()
+            .AnyAsync(s => s.CandidatoId == candidatoId && s.EvaluacionId == dto.EvaluacionId
+                && s.Estado == EstadoSesion.Finalizada);
+
+        if (sesionFinalizada)
+            return ApiResponse<SesionDto>.Conflict("Ya completaste esta evaluación.");
 
         var scoreMaximo = evaluacion.Secciones.SelectMany(s => s.Preguntas).Sum(p => p.Puntaje);
 
@@ -57,7 +84,7 @@ public class SesionService : ISesionService
             ScoreMaximo = scoreMaximo,
             CandidatoId = candidatoId,
             EvaluacionId = dto.EvaluacionId,
-            ProcesoId = dto.ProcesoId
+            ProcesoId = resolvedProcesoId
         };
 
         await _sesionRepo.AddAsync(sesion);

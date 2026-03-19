@@ -1,4 +1,5 @@
 using EvalSystem.Application.Common;
+using EvalSystem.Application.DTOs.Evaluaciones;
 using EvalSystem.Application.DTOs.Procesos;
 using EvalSystem.Application.Interfaces;
 using EvalSystem.Domain.Entities;
@@ -144,6 +145,38 @@ public class ProcesoService : IProcesoService
 
         await _uow.SaveChangesAsync();
         return ApiResponse.Ok($"{nuevas.Count} evaluación(es) asignada(s).");
+    }
+
+    public async Task<ApiResponse<IEnumerable<EvaluacionDto>>> GetMisEvaluacionesAsync(Guid candidatoId)
+    {
+        // Get IDs of active processes where the candidate is enrolled
+        var procesoIds = await _pcRepo.Query()
+            .Where(pc => pc.CandidatoId == candidatoId
+                && (pc.Proceso.Estado == EstadoProceso.Abierto
+                    || pc.Proceso.Estado == EstadoProceso.EnCurso))
+            .Select(pc => pc.ProcesoId)
+            .Distinct()
+            .ToListAsync();
+
+        if (!procesoIds.Any())
+            return ApiResponse<IEnumerable<EvaluacionDto>>.Ok(Enumerable.Empty<EvaluacionDto>());
+
+        // Get evaluation IDs assigned to those processes
+        var evalIds = await _peRepo.Query()
+            .Where(pe => procesoIds.Contains(pe.ProcesoId))
+            .Select(pe => pe.EvaluacionId)
+            .Distinct()
+            .ToListAsync();
+
+        // Return full evaluation data for active evaluations only
+        var evaluaciones = await _evalRepo.Query()
+            .Include(e => e.Tecnologia)
+            .Where(e => evalIds.Contains(e.Id) && e.Activa)
+            .ToListAsync();
+
+        return ApiResponse<IEnumerable<EvaluacionDto>>.Ok(evaluaciones.Select(e => new EvaluacionDto(
+            e.Id, e.Nombre, e.Descripcion, (int)e.Nivel, e.Nivel.ToString(),
+            e.TiempoLimiteMinutos, e.Activa, e.TecnologiaId, e.Tecnologia.Nombre, e.CreatedAt)));
     }
 
     private static ProcesoDto ToDto(ProcesoSeleccion p) => new(

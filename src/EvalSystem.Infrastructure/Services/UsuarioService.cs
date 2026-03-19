@@ -32,6 +32,12 @@ public class UsuarioService : IUsuarioService
         return ApiResponse<UsuarioDto>.Ok(ToDto(u));
     }
 
+    public async Task<ApiResponse<IEnumerable<UsuarioDto>>> GetCandidatosAsync()
+    {
+        var candidatos = await _repo.FindAsync(u => u.Rol == RolUsuario.Candidato && u.Activo);
+        return ApiResponse<IEnumerable<UsuarioDto>>.Ok(candidatos.Select(u => ToDto(u)));
+    }
+
     public async Task<ApiResponse<UsuarioDto>> CreateAsync(CreateUsuarioDto dto)
     {
         var existing = await _repo.FirstOrDefaultAsync(u => u.Email == dto.Email);
