@@ -201,6 +201,7 @@ public class EvalSystemDbContext : DbContext
         mb.Entity<RespuestaCandidato>(e =>
         {
             e.Property(r => r.Respuesta).HasMaxLength(5000).IsRequired();
+            e.Property(r => r.ComentarioRevisor).HasMaxLength(2000);
             e.HasIndex(r => new { r.SesionId, r.PreguntaId }).IsUnique();
             e.HasOne(r => r.Sesion).WithMany(s => s.Respuestas).HasForeignKey(r => r.SesionId);
             e.HasOne(r => r.Pregunta).WithMany(p => p.Respuestas).HasForeignKey(r => r.PreguntaId).OnDelete(DeleteBehavior.Restrict);
@@ -216,7 +217,7 @@ public class EvalSystemDbContext : DbContext
             e.Property(r => r.ScoreTotal).HasColumnType("decimal(5,2)");
             e.Property(r => r.ScorePorSeccion).HasMaxLength(4000);
             e.Property(r => r.BrechasIdentificadas).HasMaxLength(4000);
-            e.Property(r => r.RecomendacionIA).HasMaxLength(4000);
+            e.Property(r => r.RecomendacionIA).HasMaxLength(8000);
             e.Property(r => r.FortalezasIdentificadas).HasMaxLength(4000);
             e.HasOne(r => r.Sesion).WithOne(s => s.Resultado).HasForeignKey<ResultadoEvaluacion>(r => r.SesionId);
         });

@@ -21,3 +21,17 @@ public record CreateEvaluacionDto(string Nombre, string? Descripcion, int Nivel,
 
 public record UpdateEvaluacionDto(string? Nombre, string? Descripcion, int? Nivel,
     int? TiempoLimiteMinutos, Guid? TecnologiaId, bool? Activa);
+
+// ── Vista segura para candidatos (sin respuestas correctas) ──────────────
+
+public record OpcionParaCandidatoDto(Guid Id, string Texto, int Orden);
+
+public record PreguntaParaCandidatoDto(Guid Id, string Texto, int Tipo, string TipoNombre,
+    int Puntaje, int TiempoSegundos, int Orden, List<OpcionParaCandidatoDto>? Opciones);
+
+public record SeccionParaCandidatoDto(Guid Id, string Nombre, string? Descripcion, int Orden,
+    List<PreguntaParaCandidatoDto> Preguntas);
+
+public record EvaluacionParaCandidatoDto(Guid Id, string Nombre, string? Descripcion, int Nivel,
+    string NivelNombre, int TiempoLimiteMinutos, Guid TecnologiaId, string TecnologiaNombre,
+    List<SeccionParaCandidatoDto> Secciones, DateTime CreatedAt);

@@ -1,6 +1,7 @@
 using EvalSystem.Application.DTOs.Auth;
 using EvalSystem.Application.DTOs.Evaluaciones;
 using EvalSystem.Application.DTOs.Procesos;
+using EvalSystem.Application.DTOs.Resultados;
 using EvalSystem.Application.DTOs.Sesiones;
 using EvalSystem.Application.DTOs.Tecnologias;
 using EvalSystem.Application.DTOs.Usuarios;
@@ -208,5 +209,14 @@ public class ResponderPreguntaDtoValidator : AbstractValidator<ResponderPregunta
         RuleFor(x => x.PreguntaId).NotEmpty();
         RuleFor(x => x.Respuesta).NotEmpty().MaximumLength(10000);
         RuleFor(x => x.TiempoRespuestaSegundos).GreaterThanOrEqualTo(0);
+    }
+}
+
+public class RevisarRespuestaDtoValidator : AbstractValidator<RevisarRespuestaDto>
+{
+    public RevisarRespuestaDtoValidator()
+    {
+        RuleFor(x => x.PuntajeObtenido).GreaterThanOrEqualTo(0).WithMessage("El puntaje no puede ser negativo.");
+        RuleFor(x => x.Comentario).MaximumLength(2000).When(x => x.Comentario is not null);
     }
 }

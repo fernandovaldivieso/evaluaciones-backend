@@ -4,6 +4,7 @@ using EvalSystem.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EvalSystem.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EvalSystemDbContext))]
-    partial class EvalSystemDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260320042421_AddComentarioRevisorAndExpandIA")]
+    partial class AddComentarioRevisorAndExpandIA
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -16,17 +16,19 @@ public class ProcesoService : IProcesoService
     private readonly IRepository<ProcesoEvaluacion> _peRepo;
     private readonly IRepository<Usuario> _usuarioRepo;
     private readonly IRepository<Evaluacion> _evalRepo;
+    private readonly IRepository<SesionEvaluacion> _sesionRepo;
     private readonly IUnitOfWork _uow;
 
     public ProcesoService(IRepository<ProcesoSeleccion> procesoRepo, IRepository<ProcesoCandidato> pcRepo,
         IRepository<ProcesoEvaluacion> peRepo, IRepository<Usuario> usuarioRepo,
-        IRepository<Evaluacion> evalRepo, IUnitOfWork uow)
+        IRepository<Evaluacion> evalRepo, IRepository<SesionEvaluacion> sesionRepo, IUnitOfWork uow)
     {
         _procesoRepo = procesoRepo;
         _pcRepo = pcRepo;
         _peRepo = peRepo;
         _usuarioRepo = usuarioRepo;
         _evalRepo = evalRepo;
+        _sesionRepo = sesionRepo;
         _uow = uow;
     }
 
@@ -177,6 +179,36 @@ public class ProcesoService : IProcesoService
         return ApiResponse<IEnumerable<EvaluacionDto>>.Ok(evaluaciones.Select(e => new EvaluacionDto(
             e.Id, e.Nombre, e.Descripcion, (int)e.Nivel, e.Nivel.ToString(),
             e.TiempoLimiteMinutos, e.Activa, e.TecnologiaId, e.Tecnologia.Nombre, e.CreatedAt)));
+    }
+
+    public async Task<ApiResponse<IEnumerable<SesionProcesoDto>>> GetSesionesProcesoAsync(Guid procesoId)
+    {
+        if (!await _procesoRepo.ExistsAsync(procesoId))
+            return ApiResponse<IEnumerable<SesionProcesoDto>>.NotFound("Proceso no encontrado.");
+
+        var sesiones = await _sesionRepo.Query()
+            .Where(s => s.ProcesoId == procesoId)
+            .Include(s => s.Candidato)
+            .Include(s => s.Evaluacion).ThenInclude(e => e.Tecnologia)
+            .Include(s => s.Resultado)
+            .OrderByDescending(s => s.CreatedAt)
+            .ToListAsync();
+
+        var dtos = sesiones.Select(s =>
+        {
+            var scorePct = s.ScoreMaximo > 0 && s.ScoreObtenido.HasValue
+                ? Math.Round((decimal)s.ScoreObtenido.Value / s.ScoreMaximo * 100, 2)
+                : (decimal?)null;
+
+            return new SesionProcesoDto(
+                s.Id, s.CandidatoId, s.Candidato.Nombre, s.Candidato.Email,
+                s.EvaluacionId, s.Evaluacion.Nombre, s.Evaluacion.Tecnologia.Nombre,
+                (int)s.Estado, s.Estado.ToString(), s.FechaInicio, s.FechaFin,
+                s.ScoreObtenido, s.ScoreMaximo, scorePct,
+                s.Resultado is not null, s.CreatedAt);
+        });
+
+        return ApiResponse<IEnumerable<SesionProcesoDto>>.Ok(dtos);
     }
 
     private static ProcesoDto ToDto(ProcesoSeleccion p) => new(

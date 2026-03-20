@@ -26,6 +26,9 @@ public static class DependencyInjection
         services.AddScoped<ISesionService, SesionService>();
         services.AddScoped<IResultadoService, ResultadoService>();
 
+        // IA Service (via HttpClient)
+        services.AddHttpClient<IAnalisisIAService, OpenAiAnalisisService>();
+
         return services;
     }
 }

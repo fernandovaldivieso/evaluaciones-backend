@@ -12,6 +12,7 @@ public interface IEvaluacionService
     Task<ApiResponse<EvaluacionDto>> UpdateAsync(Guid id, UpdateEvaluacionDto dto);
     Task<ApiResponse> DeleteAsync(Guid id);
     Task<ApiResponse<EvaluacionDto>> DuplicarAsync(Guid id);
+    Task<ApiResponse<EvaluacionParaCandidatoDto>> GetParaCandidatoAsync(Guid id);
 
     // Secciones
     Task<ApiResponse<IEnumerable<SeccionDto>>> GetSeccionesAsync(Guid evaluacionId);

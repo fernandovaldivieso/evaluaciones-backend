@@ -15,3 +15,10 @@ public record CreateProcesoDto(string Nombre, string? Descripcion, string? Puest
 public record UpdateProcesoDto(string? Nombre, string? Descripcion, string? Puesto, int? Estado, DateTime? FechaLimite);
 public record AsignarCandidatosDto(List<Guid> CandidatoIds);
 public record AsignarEvaluacionesDto(List<Guid> EvaluacionIds);
+
+// Vista de sesiones dentro de un proceso (recruiter dashboard)
+public record SesionProcesoDto(Guid SesionId, Guid CandidatoId, string CandidatoNombre, string CandidatoEmail,
+    Guid EvaluacionId, string EvaluacionNombre, string TecnologiaNombre,
+    int Estado, string EstadoNombre, DateTime? FechaInicio, DateTime? FechaFin,
+    int? ScoreObtenido, int ScoreMaximo, decimal? ScorePorcentaje,
+    bool TieneResultado, DateTime CreatedAt);

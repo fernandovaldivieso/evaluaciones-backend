@@ -9,3 +9,6 @@ public record ComparacionCandidatoDto(Guid CandidatoId, string CandidatoNombre,
 
 public record RankingProcesoDto(Guid ProcesoId, string ProcesoNombre,
     List<ComparacionCandidatoDto> Ranking);
+
+// DTO para revisión manual de preguntas Abierta/Código
+public record RevisarRespuestaDto(int PuntajeObtenido, string? Comentario);

@@ -19,7 +19,13 @@ public class EvaluacionesController : BaseApiController
     public async Task<IActionResult> GetById(Guid id) => Respond(await _service.GetByIdAsync(id));
 
     [HttpGet("{id:guid}/detalle")]
+    [Authorize(Roles = "Admin,Evaluador")]
     public async Task<IActionResult> GetDetalle(Guid id) => Respond(await _service.GetDetalleAsync(id));
+
+    // Vista segura para candidatos: sin respuestas correctas ni explicaciones
+    [HttpGet("{id:guid}/para-candidato")]
+    public async Task<IActionResult> GetParaCandidato(Guid id)
+        => Respond(await _service.GetParaCandidatoAsync(id));
 
     [HttpPost]
     [Authorize(Roles = "Admin,Evaluador")]

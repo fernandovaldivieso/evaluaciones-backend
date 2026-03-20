@@ -21,14 +21,18 @@ public class SesionesController : BaseApiController
 
     [HttpPost("{sesionId:guid}/responder")]
     public async Task<IActionResult> Responder(Guid sesionId, [FromBody] ResponderPreguntaDto dto)
-        => Respond(await _service.ResponderAsync(sesionId, dto));
+        => Respond(await _service.ResponderAsync(sesionId, dto, GetUserId()));
 
     [HttpPost("{sesionId:guid}/finalizar")]
     public async Task<IActionResult> Finalizar(Guid sesionId)
-        => Respond(await _service.FinalizarAsync(sesionId));
+        => Respond(await _service.FinalizarAsync(sesionId, GetUserId()));
 
     [HttpGet("{sesionId:guid}/progreso")]
     public async Task<IActionResult> GetProgreso(Guid sesionId) => Respond(await _service.GetProgresoAsync(sesionId));
+
+    [HttpGet("{sesionId:guid}/respuestas")]
+    public async Task<IActionResult> GetRespuestas(Guid sesionId)
+        => Respond(await _service.GetRespuestasAsync(sesionId));
 
     [HttpGet("candidato/{candidatoId:guid}")]
     [Authorize(Roles = "Admin,Evaluador")]

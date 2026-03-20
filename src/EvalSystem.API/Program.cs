@@ -1,4 +1,6 @@
 using System.Text;
+using EvalSystem.API.BackgroundServices;
+using EvalSystem.API.Hubs;
 using EvalSystem.API.Middleware;
 using EvalSystem.Infrastructure;
 using FluentValidation;
@@ -19,6 +21,9 @@ builder.Services.AddFluentValidationAutoValidation();
 // ── Controllers ──
 builder.Services.AddControllers();
 
+// ── SignalR ──
+builder.Services.AddSignalR();
+
 // ── JWT Authentication ──
 var jwtKey = builder.Configuration["Jwt:Key"]!;
 builder.Services.AddAuthentication(options =>
@@ -37,6 +42,21 @@ builder.Services.AddAuthentication(options =>
         ValidAudience = builder.Configuration["Jwt:Audience"],
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
         ClockSkew = TimeSpan.FromSeconds(30)
+    };
+
+    // Allow JWT from query string for SignalR
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        }
     };
 });
 builder.Services.AddAuthorization();
@@ -67,13 +87,22 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // ── CORS ──
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? new[] { "http://localhost:5173", "http://localhost:3000" };
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+        policy.WithOrigins(allowedOrigins)
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
     });
 });
+
+// ── Background Services ──
+builder.Services.AddHostedService<SesionExpirationService>();
 
 var app = builder.Build();
 
@@ -90,5 +119,6 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<SesionHub>("/hubs/sesion");
 
 app.Run();

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using EvalSystem.Application.Common;
 using EvalSystem.Application.DTOs.Resultados;
+using EvalSystem.Application.DTOs.Sesiones;
 using EvalSystem.Application.Interfaces;
 using EvalSystem.Domain.Entities;
 using EvalSystem.Domain.Enums;
@@ -13,15 +14,20 @@ public class ResultadoService : IResultadoService
 {
     private readonly IRepository<ResultadoEvaluacion> _resultadoRepo;
     private readonly IRepository<SesionEvaluacion> _sesionRepo;
+    private readonly IRepository<RespuestaCandidato> _respuestaRepo;
     private readonly IRepository<ProcesoSeleccion> _procesoRepo;
+    private readonly IAnalisisIAService _iaService;
     private readonly IUnitOfWork _uow;
 
     public ResultadoService(IRepository<ResultadoEvaluacion> resultadoRepo,
-        IRepository<SesionEvaluacion> sesionRepo, IRepository<ProcesoSeleccion> procesoRepo, IUnitOfWork uow)
+        IRepository<SesionEvaluacion> sesionRepo, IRepository<RespuestaCandidato> respuestaRepo,
+        IRepository<ProcesoSeleccion> procesoRepo, IAnalisisIAService iaService, IUnitOfWork uow)
     {
         _resultadoRepo = resultadoRepo;
         _sesionRepo = sesionRepo;
+        _respuestaRepo = respuestaRepo;
         _procesoRepo = procesoRepo;
+        _iaService = iaService;
         _uow = uow;
     }
 
@@ -29,8 +35,9 @@ public class ResultadoService : IResultadoService
     {
         var sesion = await _sesionRepo.Query()
             .Include(s => s.Candidato)
+            .Include(s => s.Evaluacion).ThenInclude(e => e.Tecnologia)
             .Include(s => s.Evaluacion).ThenInclude(e => e.Secciones).ThenInclude(sec => sec.Preguntas)
-            .Include(s => s.Respuestas)
+            .Include(s => s.Respuestas).ThenInclude(r => r.Pregunta)
             .FirstOrDefaultAsync(s => s.Id == sesionId);
 
         if (sesion is null) return ApiResponse<ResultadoDto>.NotFound("Sesión no encontrada.");
@@ -38,8 +45,6 @@ public class ResultadoService : IResultadoService
             return ApiResponse<ResultadoDto>.BadRequest("La sesión debe estar finalizada para generar resultados.");
 
         var existente = await _resultadoRepo.Query().FirstOrDefaultAsync(r => r.SesionId == sesionId);
-        if (existente is not null)
-            return ApiResponse<ResultadoDto>.Conflict("Ya existe un resultado para esta sesión.");
 
         var scoresPorSeccion = new Dictionary<string, object>();
         var fortalezas = new List<string>();
@@ -60,33 +65,87 @@ public class ResultadoService : IResultadoService
             else brechas.Add(seccion.Nombre);
         }
 
+        // Recalcular desde las respuestas actuales (no usar ScoreObtenido que puede estar desactualizado)
+        var totalPuntosObtenidos = sesion.Respuestas.Sum(r => r.PuntajeObtenido ?? 0);
         var scoreTotal = sesion.ScoreMaximo > 0
-            ? Math.Round((decimal)(sesion.ScoreObtenido ?? 0) / sesion.ScoreMaximo * 100, 2) : 0;
+            ? Math.Round((decimal)totalPuntosObtenidos / sesion.ScoreMaximo * 100, 2) : 0;
 
-        var recomendacion = scoreTotal switch
+        // Actualizar ScoreObtenido de la sesión para mantener consistencia
+        sesion.ScoreObtenido = totalPuntosObtenidos;
+        _sesionRepo.Update(sesion);
+
+        // Construir contexto para análisis IA
+        var seccionScores = sesion.Evaluacion.Secciones.Select(sec =>
         {
-            >= 90 => "Candidato(a) con excelente dominio. Altamente recomendado(a) para el puesto.",
-            >= 70 => "Candidato(a) con buen nivel. Considerar para el puesto con plan de desarrollo en áreas de mejora.",
-            >= 50 => "Candidato(a) con nivel intermedio. Requiere desarrollo significativo en áreas débiles.",
-            _ => "Candidato(a) necesita formación adicional antes de ser considerado(a) para el puesto."
-        };
+            var pregIds = sec.Preguntas.Select(p => p.Id).ToHashSet();
+            var respSec = sesion.Respuestas.Where(r => pregIds.Contains(r.PreguntaId)).ToList();
+            var max = sec.Preguntas.Sum(p => p.Puntaje);
+            var obt = respSec.Sum(r => r.PuntajeObtenido ?? 0);
+            var pct = max > 0 ? Math.Round((decimal)obt / max * 100, 2) : 0;
+            return new SeccionScoreInfo(sec.Nombre, obt, max, pct);
+        }).ToList();
 
-        var resultado = new ResultadoEvaluacion
+        var respuestasAbiertas = sesion.Respuestas
+            .Where(r => r.Pregunta.Tipo == TipoPregunta.Abierta || r.Pregunta.Tipo == TipoPregunta.Codigo)
+            .Select(r => new RespuestaAbiertaInfo(
+                r.Pregunta.Texto, r.Respuesta, r.PuntajeObtenido ?? 0, r.Pregunta.Puntaje))
+            .ToList();
+
+        var tiempoTotal = sesion.FechaInicio.HasValue && sesion.FechaFin.HasValue
+            ? (int)(sesion.FechaFin.Value - sesion.FechaInicio.Value).TotalSeconds : 0;
+
+        var contextoIA = new AnalisisContexto(
+            sesion.Candidato.Nombre,
+            sesion.Evaluacion.Nombre,
+            sesion.Evaluacion.Tecnologia.Nombre,
+            sesion.Evaluacion.Nivel.ToString(),
+            scoreTotal,
+            seccionScores,
+            fortalezas,
+            brechas,
+            respuestasAbiertas,
+            sesion.Evaluacion.Secciones.SelectMany(s => s.Preguntas).Count(),
+            sesion.Respuestas.Count,
+            tiempoTotal
+        );
+
+        var recomendacion = await _iaService.GenerarAnalisisAsync(contextoIA);
+
+        ResultadoEvaluacion resultado;
+        string mensaje;
+
+        if (existente is not null)
         {
-            ScoreTotal = scoreTotal,
-            ScorePorSeccion = JsonSerializer.Serialize(scoresPorSeccion),
-            BrechasIdentificadas = brechas.Count > 0 ? string.Join(", ", brechas) : null,
-            FortalezasIdentificadas = fortalezas.Count > 0 ? string.Join(", ", fortalezas) : null,
-            RecomendacionIA = recomendacion,
-            FechaAnalisis = DateTime.UtcNow,
-            SesionId = sesionId
-        };
+            // Re-análisis: actualizar resultado existente (permite regenerar tras revisión manual)
+            existente.ScoreTotal = scoreTotal;
+            existente.ScorePorSeccion = JsonSerializer.Serialize(scoresPorSeccion);
+            existente.BrechasIdentificadas = brechas.Count > 0 ? string.Join(", ", brechas) : null;
+            existente.FortalezasIdentificadas = fortalezas.Count > 0 ? string.Join(", ", fortalezas) : null;
+            existente.RecomendacionIA = recomendacion;
+            existente.FechaAnalisis = DateTime.UtcNow;
+            _resultadoRepo.Update(existente);
+            resultado = existente;
+            mensaje = "Análisis actualizado exitosamente.";
+        }
+        else
+        {
+            resultado = new ResultadoEvaluacion
+            {
+                ScoreTotal = scoreTotal,
+                ScorePorSeccion = JsonSerializer.Serialize(scoresPorSeccion),
+                BrechasIdentificadas = brechas.Count > 0 ? string.Join(", ", brechas) : null,
+                FortalezasIdentificadas = fortalezas.Count > 0 ? string.Join(", ", fortalezas) : null,
+                RecomendacionIA = recomendacion,
+                FechaAnalisis = DateTime.UtcNow,
+                SesionId = sesionId
+            };
+            await _resultadoRepo.AddAsync(resultado);
+            mensaje = "Análisis generado exitosamente.";
+        }
 
-        await _resultadoRepo.AddAsync(resultado);
         await _uow.SaveChangesAsync();
 
-        return ApiResponse<ResultadoDto>.Created(ToDto(resultado, sesion.Candidato.Nombre, sesion.Evaluacion.Nombre),
-            "Análisis generado exitosamente.");
+        return ApiResponse<ResultadoDto>.Ok(ToDto(resultado, sesion.Candidato.Nombre, sesion.Evaluacion.Nombre), mensaje);
     }
 
     public async Task<ApiResponse<ResultadoDto>> GetBySesionAsync(Guid sesionId)
@@ -98,6 +157,67 @@ public class ResultadoService : IResultadoService
 
         if (resultado is null) return ApiResponse<ResultadoDto>.NotFound("Resultado no encontrado.");
         return ApiResponse<ResultadoDto>.Ok(ToDto(resultado, resultado.Sesion.Candidato.Nombre, resultado.Sesion.Evaluacion.Nombre));
+    }
+
+    public async Task<ApiResponse<ResultadoDto>> GetMiResultadoAsync(Guid sesionId, Guid candidatoId)
+    {
+        var resultado = await _resultadoRepo.Query()
+            .Include(r => r.Sesion).ThenInclude(s => s.Candidato)
+            .Include(r => r.Sesion).ThenInclude(s => s.Evaluacion)
+            .FirstOrDefaultAsync(r => r.SesionId == sesionId);
+
+        if (resultado is null) return ApiResponse<ResultadoDto>.NotFound("Resultado no encontrado.");
+        if (resultado.Sesion.CandidatoId != candidatoId)
+            return ApiResponse<ResultadoDto>.Forbidden("No tienes acceso a este resultado.");
+
+        return ApiResponse<ResultadoDto>.Ok(ToDto(resultado, resultado.Sesion.Candidato.Nombre, resultado.Sesion.Evaluacion.Nombre));
+    }
+
+    public async Task<ApiResponse<RespuestaSesionDto>> RevisarRespuestaAsync(Guid sesionId, Guid respuestaId, RevisarRespuestaDto dto)
+    {
+        var sesion = await _sesionRepo.Query()
+            .Include(s => s.Respuestas)
+            .FirstOrDefaultAsync(s => s.Id == sesionId);
+
+        if (sesion is null) return ApiResponse<RespuestaSesionDto>.NotFound("Sesión no encontrada.");
+        if (sesion.Estado != EstadoSesion.Finalizada)
+            return ApiResponse<RespuestaSesionDto>.BadRequest("Solo se pueden revisar respuestas de sesiones finalizadas.");
+
+        var respuesta = await _respuestaRepo.Query()
+            .Include(r => r.Pregunta)
+            .Include(r => r.OpcionSeleccionada)
+            .FirstOrDefaultAsync(r => r.Id == respuestaId && r.SesionId == sesionId);
+
+        if (respuesta is null) return ApiResponse<RespuestaSesionDto>.NotFound("Respuesta no encontrada en esta sesión.");
+
+        if (respuesta.Pregunta.Tipo != TipoPregunta.Abierta && respuesta.Pregunta.Tipo != TipoPregunta.Codigo)
+            return ApiResponse<RespuestaSesionDto>.BadRequest("Solo se pueden revisar manualmente preguntas de tipo Abierta o Código.");
+
+        if (dto.PuntajeObtenido < 0 || dto.PuntajeObtenido > respuesta.Pregunta.Puntaje)
+            return ApiResponse<RespuestaSesionDto>.BadRequest($"El puntaje debe estar entre 0 y {respuesta.Pregunta.Puntaje}.");
+
+        respuesta.PuntajeObtenido = dto.PuntajeObtenido;
+        respuesta.EsCorrecta = dto.PuntajeObtenido > 0;
+        respuesta.ComentarioRevisor = dto.Comentario;
+        _respuestaRepo.Update(respuesta);
+
+        // Recalcular ScoreObtenido de la sesión en memoria
+        var otrasRespuestas = sesion.Respuestas
+            .Where(r => r.Id != respuestaId)
+            .Sum(r => r.PuntajeObtenido ?? 0);
+        sesion.ScoreObtenido = otrasRespuestas + dto.PuntajeObtenido;
+        _sesionRepo.Update(sesion);
+
+        await _uow.SaveChangesAsync();
+
+        return ApiResponse<RespuestaSesionDto>.Ok(new RespuestaSesionDto(
+            respuesta.Id, respuesta.PreguntaId, respuesta.Pregunta.Texto,
+            (int)respuesta.Pregunta.Tipo, respuesta.Pregunta.Tipo.ToString(),
+            respuesta.Respuesta, respuesta.TiempoRespuestaSegundos,
+            respuesta.EsCorrecta, respuesta.PuntajeObtenido, respuesta.Pregunta.Puntaje,
+            respuesta.OpcionSeleccionadaId, respuesta.OpcionSeleccionada?.Texto,
+            respuesta.ComentarioRevisor,
+            respuesta.CreatedAt), "Respuesta revisada correctamente.");
     }
 
     public async Task<ApiResponse<RankingProcesoDto>> GetRankingAsync(Guid procesoId)

@@ -13,4 +13,5 @@ public interface IProcesoService
     Task<ApiResponse> AsignarCandidatosAsync(Guid procesoId, AsignarCandidatosDto dto);
     Task<ApiResponse> AsignarEvaluacionesAsync(Guid procesoId, AsignarEvaluacionesDto dto);
     Task<ApiResponse<IEnumerable<EvaluacionDto>>> GetMisEvaluacionesAsync(Guid candidatoId);
+    Task<ApiResponse<IEnumerable<SesionProcesoDto>>> GetSesionesProcesoAsync(Guid procesoId);
 }

@@ -8,6 +8,7 @@ public class RespuestaCandidato : BaseEntity
     public int TiempoRespuestaSegundos { get; set; }
     public bool? EsCorrecta { get; set; }
     public int? PuntajeObtenido { get; set; }
+    public string? ComentarioRevisor { get; set; }
 
     public Guid SesionId { get; set; }
     public Guid PreguntaId { get; set; }

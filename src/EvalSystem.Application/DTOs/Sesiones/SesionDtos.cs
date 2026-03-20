@@ -13,3 +13,10 @@ public record ProgresoSesionDto(Guid SesionId, int TotalPreguntas, int Preguntas
 
 public record RespuestaDto(Guid Id, Guid PreguntaId, string PreguntaTexto, string Respuesta,
     int TiempoRespuestaSegundos, bool? EsCorrecta, int? PuntajeObtenido, DateTime CreatedAt);
+
+// Vista detallada de respuesta para revisión del reclutador
+public record RespuestaSesionDto(Guid Id, Guid PreguntaId, string PreguntaTexto,
+    int TipoPregunta, string TipoPreguntaNombre, string Respuesta, int TiempoRespuestaSegundos,
+    bool? EsCorrecta, int? PuntajeObtenido, int PuntajeMaximo,
+    Guid? OpcionSeleccionadaId, string? OpcionSeleccionadaTexto,
+    string? ComentarioRevisor, DateTime CreatedAt);

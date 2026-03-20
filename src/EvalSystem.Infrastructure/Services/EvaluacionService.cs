@@ -121,6 +121,32 @@ public class EvaluacionService : IEvaluacionService
         return ApiResponse.Ok("Evaluación eliminada.");
     }
 
+    public async Task<ApiResponse<EvaluacionParaCandidatoDto>> GetParaCandidatoAsync(Guid id)
+    {
+        var e = await _evalRepo.Query()
+            .Include(x => x.Tecnologia)
+            .Include(x => x.Secciones.OrderBy(s => s.Orden))
+                .ThenInclude(s => s.Preguntas.OrderBy(p => p.Orden))
+                    .ThenInclude(p => p.Opciones.OrderBy(o => o.Orden))
+            .FirstOrDefaultAsync(x => x.Id == id);
+
+        if (e is null) return ApiResponse<EvaluacionParaCandidatoDto>.NotFound($"Evaluación con Id '{id}' no encontrada.");
+        if (!e.Activa) return ApiResponse<EvaluacionParaCandidatoDto>.BadRequest("La evaluación no está activa.");
+
+        var dto = new EvaluacionParaCandidatoDto(e.Id, e.Nombre, e.Descripcion, (int)e.Nivel, e.Nivel.ToString(),
+            e.TiempoLimiteMinutos, e.TecnologiaId, e.Tecnologia.Nombre,
+            e.Secciones.Select(s => new SeccionParaCandidatoDto(s.Id, s.Nombre, s.Descripcion, s.Orden,
+                s.Preguntas.Select(p => new PreguntaParaCandidatoDto(p.Id, p.Texto, (int)p.Tipo, p.Tipo.ToString(),
+                    p.Puntaje, p.TiempoSegundos, p.Orden,
+                    p.Opciones.Count > 0
+                        ? p.Opciones.Select(o => new OpcionParaCandidatoDto(o.Id, o.Texto, o.Orden)).ToList()
+                        : null
+                )).ToList()
+            )).ToList(), e.CreatedAt);
+
+        return ApiResponse<EvaluacionParaCandidatoDto>.Ok(dto);
+    }
+
     public async Task<ApiResponse<EvaluacionDto>> DuplicarAsync(Guid id)
     {
         var original = await _evalRepo.Query()

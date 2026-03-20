@@ -107,12 +107,32 @@ public class SesionService : ISesionService
         return ApiResponse<SesionDto>.Ok(ToDto(s));
     }
 
-    public async Task<ApiResponse<RespuestaDto>> ResponderAsync(Guid sesionId, ResponderPreguntaDto dto)
+    public async Task<ApiResponse<RespuestaDto>> ResponderAsync(Guid sesionId, ResponderPreguntaDto dto, Guid requestorId)
     {
-        var sesion = await _sesionRepo.GetByIdAsync(sesionId);
+        var sesion = await _sesionRepo.Query()
+            .Include(s => s.Evaluacion)
+            .Include(s => s.Respuestas)
+            .FirstOrDefaultAsync(s => s.Id == sesionId);
+
         if (sesion is null) return ApiResponse<RespuestaDto>.NotFound("Sesión no encontrada.");
+        if (sesion.CandidatoId != requestorId) return ApiResponse<RespuestaDto>.Forbidden("No tienes acceso a esta sesión.");
         if (sesion.Estado != EstadoSesion.EnProgreso)
             return ApiResponse<RespuestaDto>.BadRequest("La sesión no está en progreso.");
+
+        // Verificar si el tiempo límite fue superado
+        if (sesion.FechaInicio.HasValue && sesion.Evaluacion.TiempoLimiteMinutos > 0)
+        {
+            var limiteExpiracion = sesion.FechaInicio.Value.AddMinutes(sesion.Evaluacion.TiempoLimiteMinutos);
+            if (DateTime.UtcNow > limiteExpiracion)
+            {
+                sesion.Estado = EstadoSesion.Expirada;
+                sesion.FechaFin = limiteExpiracion;
+                sesion.ScoreObtenido = sesion.Respuestas.Sum(r => r.PuntajeObtenido ?? 0);
+                _sesionRepo.Update(sesion);
+                await _uow.SaveChangesAsync();
+                return ApiResponse<RespuestaDto>.BadRequest("El tiempo de evaluación ha expirado. La sesión fue marcada como expirada.");
+            }
+        }
 
         var pregunta = await _preguntaRepo.Query()
             .Include(p => p.Opciones)
@@ -162,7 +182,7 @@ public class SesionService : ISesionService
         return ApiResponse<RespuestaDto>.Created(ToRespuestaDto(saved));
     }
 
-    public async Task<ApiResponse<SesionDto>> FinalizarAsync(Guid sesionId)
+    public async Task<ApiResponse<SesionDto>> FinalizarAsync(Guid sesionId, Guid requestorId)
     {
         var sesion = await _sesionRepo.Query()
             .Include(s => s.Candidato).Include(s => s.Evaluacion)
@@ -170,6 +190,7 @@ public class SesionService : ISesionService
             .FirstOrDefaultAsync(s => s.Id == sesionId);
 
         if (sesion is null) return ApiResponse<SesionDto>.NotFound("Sesión no encontrada.");
+        if (sesion.CandidatoId != requestorId) return ApiResponse<SesionDto>.Forbidden("No tienes acceso a esta sesión.");
         if (sesion.Estado != EstadoSesion.EnProgreso)
             return ApiResponse<SesionDto>.BadRequest("La sesión no está en progreso.");
 
@@ -221,6 +242,21 @@ public class SesionService : ISesionService
         return ApiResponse<IEnumerable<SesionDto>>.Ok(sesiones.Select(ToDto));
     }
 
+    public async Task<ApiResponse<IEnumerable<RespuestaSesionDto>>> GetRespuestasAsync(Guid sesionId)
+    {
+        if (!await _sesionRepo.Query().AnyAsync(s => s.Id == sesionId))
+            return ApiResponse<IEnumerable<RespuestaSesionDto>>.NotFound("Sesión no encontrada.");
+
+        var respuestas = await _respuestaRepo.Query()
+            .Where(r => r.SesionId == sesionId)
+            .Include(r => r.Pregunta)
+            .Include(r => r.OpcionSeleccionada)
+            .OrderBy(r => r.CreatedAt)
+            .ToListAsync();
+
+        return ApiResponse<IEnumerable<RespuestaSesionDto>>.Ok(respuestas.Select(ToRespuestaSesionDto));
+    }
+
     private static SesionDto ToDto(SesionEvaluacion s) => new(
         s.Id, (int)s.Estado, s.Estado.ToString(), s.FechaInicio, s.FechaFin,
         s.ScoreObtenido, s.ScoreMaximo, s.CandidatoId, s.Candidato.Nombre,
@@ -229,4 +265,13 @@ public class SesionService : ISesionService
     private static RespuestaDto ToRespuestaDto(RespuestaCandidato r) => new(
         r.Id, r.PreguntaId, r.Pregunta.Texto, r.Respuesta,
         r.TiempoRespuestaSegundos, r.EsCorrecta, r.PuntajeObtenido, r.CreatedAt);
+
+    private static RespuestaSesionDto ToRespuestaSesionDto(RespuestaCandidato r) => new(
+        r.Id, r.PreguntaId, r.Pregunta.Texto,
+        (int)r.Pregunta.Tipo, r.Pregunta.Tipo.ToString(),
+        r.Respuesta, r.TiempoRespuestaSegundos,
+        r.EsCorrecta, r.PuntajeObtenido, r.Pregunta.Puntaje,
+        r.OpcionSeleccionadaId, r.OpcionSeleccionada?.Texto,
+        r.ComentarioRevisor,
+        r.CreatedAt);
 }
